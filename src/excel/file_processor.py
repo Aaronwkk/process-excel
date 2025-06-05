@@ -1,178 +1,224 @@
+import pandas as pd
+from pymongo import MongoClient
+import re
 import os
-import openpyxl
+from openpyxl import load_workbook
+from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils import get_column_letter
-from openpyxl.styles import Font, Alignment
-from openpyxl.worksheet.cell_range import CellRange
+from openpyxl.worksheet.merge import MergeCells
+from openpyxl.utils import range_boundaries
 
-def clean_header_string(header_str):
+def apply_styles(ws):
     """
-    清理表头字符串，移除首尾空格、换行符等。
+    应用 Excel 文件的样式设置。
+    Args:
+        ws: openpyxl 的 worksheet 对象。
     """
-    if header_str is None:
-        return None
-    # 转换为字符串，移除所有换行符（包括\n和\r），然后移除首尾空格
-    return str(header_str).replace('\n', '').replace('\r', '').strip()
+    # 获取工作表的实际最大列数
+    max_column = ws.max_column
+    max_column_letter = get_column_letter(max_column)
 
-def get_merged_cell_value(sheet, row, col):
-    """
-    获取单元格的真实值，考虑合并单元格的情况。
-    如果单元格在合并区域内，返回合并区域左上角的值。
-    """
-    cell = sheet.cell(row=row, column=col)
+    # --- 前三行合并单元格，字体大小为24，加粗 ---
+    # 合并 A1 到 A3，横跨所有列
+    ws.merge_cells(f'A1:{max_column_letter}3')
+    top_left_cell = ws['A1']
+    top_left_cell.font = Font(size=24, bold=True)
+    top_left_cell.alignment = Alignment(horizontal='center', vertical='center') # 居中
 
-    for merged_range in sheet.merged_cells.ranges:
-        if cell.coordinate in merged_range:
-            return sheet.cell(row=merged_range.min_row, column=merged_range.min_col).value
+    # --- 第四行合并单元格 ---
+    ws.merge_cells(f'A4:{max_column_letter}4')
+    ws['A4'].alignment = Alignment(horizontal='center', vertical='center') # 居中
 
-    return cell.value
-
-def apply_excel_styles(sheet, header_rows, output_col_idx):
-    """
-    为Excel工作表应用指定样式。
-    - 第一、二、三行合并单元格并设置字体大小24，加粗。
-    - 第四行合并单元格。
-    - 第六行和第七行（如果存在）合并单元格，字体加粗。
-    - 所有单元格内的文字居中。
-    - 所有列的列宽设置为15。
-    :param sheet: openpyxl工作表对象
-    :param header_rows: 表头行列表
-    :param output_col_idx: 新增列的索引
-    """
-    max_col = sheet.max_column
-
-    # Style 1: Merge A1:max_col_at_row_3, font size 24, bold, center
-    if sheet.max_row >= 3:
-        # Check if cells A1 to current max_col are already merged or contain data before merging
-        if not sheet.merged_cells.ranges:
-            sheet.merge_cells(start_row=1, start_column=1, end_row=3, end_column=max_col)
-            top_left_cell = sheet.cell(row=1, column=1)
-            top_left_cell.font = Font(size=24, bold=True)
-            top_left_cell.alignment = Alignment(horizontal='center', vertical='center')
-        else:
-            print(f"    警告: 工作表 {sheet.title} 包含现有合并单元格，可能无法应用第一行到第三行的合并样式。")
+    # --- 第五行和第六行纵向合并单元格，作为表格表头，字体大小12 并加粗 ---
+    # 遍历所有列，对第五行和第六行进行纵向合并
+    for col_idx in range(1, max_column + 1):
+        col_letter = get_column_letter(col_idx)
+        # 检查是否已经存在合并单元格，避免重复合并
+        if f'{col_letter}5:{col_letter}6' not in [str(m) for m in ws.merged_cells.ranges]:
+            ws.merge_cells(f'{col_letter}5:{col_letter}6')
+        
+        # 设置表头字体和居中
+        header_cell = ws.cell(row=5, column=col_idx)
+        header_cell.font = Font(size=12, bold=True)
+        header_cell.alignment = Alignment(horizontal='center', vertical='center')
+        
+        # 确保第六行的对应单元格也居中，因为它们被合并了
+        ws.cell(row=6, column=col_idx).alignment = Alignment(horizontal='center', vertical='center')
 
 
-    # Style 2: Merge row 4 (across all columns), center
-    if sheet.max_row >= 4:
-        sheet.merge_cells(start_row=4, start_column=1, end_row=4, end_column=max_col)
-        sheet.cell(row=4, column=1).alignment = Alignment(horizontal='center', vertical='center')
-
-    # Style 3: Merge header rows (row 6 and 7 if applicable) for the new column, bold, center
-    for h_row in header_rows:
-        if h_row <= sheet.max_row:
-            for col_idx in range(1, max_col + 1):
-                cell = sheet.cell(row=h_row, column=col_idx)
-                cell.font = Font(bold=True)
-                cell.alignment = Alignment(horizontal='center', vertical='center')
-
-    # Apply centering to all cells (overwrites previous alignments if applied)
-    for row in sheet.iter_rows():
+    # --- 设置所有单元格文字居中 ---
+    for row in ws.iter_rows():
         for cell in row:
             cell.alignment = Alignment(horizontal='center', vertical='center')
 
-    # New Style: Set column width for all columns to 15
-    for col_idx in range(1, max_col + 1):
-        col_letter = get_column_letter(col_idx)
-        sheet.column_dimensions[col_letter].width = 15
+    # --- 列宽设定 ---
+    # 宽度以内容多少做适配 (针对前三行标题) - 这个通常是自动的，但这里可以设置一个基础值
+    # 对于所有列，设置默认宽度为12
+    for col_idx in range(1, max_column + 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = 12
+
+    # “身份证号码”列宽为 20
+    # 需要找到“身份证号码”列的索引
+    header_row_index = 5
+    headers = [cell.value for cell in ws[header_row_index]]
+    
+    # 清理表头，去除空格、换行符，以便查找
+    cleaned_headers = [str(h).strip().replace('\n', '').replace('\r', '') if h is not None else '' for h in headers]
+
+    try:
+        id_card_col_idx = cleaned_headers.index("身份证号码") + 1
+        ws.column_dimensions[get_column_letter(id_card_col_idx)].width = 20
+    except ValueError:
+        print("警告: 未找到 '身份证号码' 列，无法单独设置其宽度。")
 
 
-def batch_process_excel_add_column(folder_path, insurance_area_header, compensation_factor, output_column_header, header_rows=[5, 6]):
-    """
-    批量处理Excel文件，新增“赔偿金额”列并根据投保面积和自定义赔偿系数计算填充数据。
-    不会修改表格内的其他原有内容。
-    :param folder_path: 文件夹路径
-    :param insurance_area_header: 投保面积的表头名称（例如 "投保面积"）
-    :param compensation_factor: 自定义的赔偿系数（浮点数）
-    :param output_column_header: 赔偿金额的表头名称（例如 "赔偿金额"）
-    :param header_rows: 表头可能存在的行列表（例如 [5, 6]）
-    """
-    processed_files = 0
+def main():
+    # --- 配置参数 ---
+    mongodb_uri = "mongodb://localhost:27017/"
+    db_name = "agricultural_insurance"
+    collection_name = "loss_records"
+    
+    # 需要处理的文件路径
+    path = "/Users/a1/理赔文件/_data/"  # 包含 Excel 文件的目录
+    output_path = "/Users/a1/理赔文件/_deal_data/"  # 处理后文件的输出目录
+    
+    INSURANCE_AMOUNT_FACTOR = 17 # 固定值，用于计算赔款金额
 
-    # 对输入表头进行标准化处理一次
-    clean_insurance_area_header = clean_header_string(insurance_area_header)
-    clean_output_column_header = clean_header_string(output_column_header)
+    # 确保输出目录存在
+    os.makedirs(output_path, exist_ok=True)
 
-    for filename in os.listdir(folder_path):
-        if filename.endswith('.xlsx'):
-            filepath = os.path.join(folder_path, filename)
+    # 连接 MongoDB
+    client = MongoClient(mongodb_uri)
+    db = client[db_name]
+    collection = db[collection_name]
+
+    # 遍历处理目录下的所有 Excel 文件
+    for filename in os.listdir(path):
+        if filename.endswith(('.xlsx', '.xls')):
+            file_path = os.path.join(path, filename)
+            print(f"正在处理文件: {filename}")
 
             try:
-                wb = openpyxl.load_workbook(filepath)
+                # 提取行政村关键字
+                match = re.match(r"^(.*?村委会)", filename)
+                if not match:
+                    print(f"警告: 文件名 '{filename}' 未能提取到行政村信息，跳过。")
+                    continue
+                village_name = match.group(1).replace("村委会", "村")
 
-                for sheet_name in wb.sheetnames:
-                    sheet = wb[sheet_name]
+                # 从 MongoDB 查找数据
+                mongo_data = list(collection.find({"village": village_name}))
+                if not mongo_data:
+                    print(f"警告: 在 MongoDB 中未找到与 '{village_name}' 匹配的数据，跳过文件 '{filename}'。")
+                    continue
 
-                    insurance_area_col_idx = -1
-                    output_col_idx = -1
-                    actual_header_row_for_data_start = -1
+                # 加载 Excel 文件 (使用 openpyxl 进行写入和格式化)
+                wb = load_workbook(file_path)
+                ws = wb.active
 
-                    max_col_on_sheet = sheet.max_column
+                # 找到表头行（第五行）
+                header_row_index = 5
+                headers = [cell.value for cell in ws[header_row_index]]
+                
+                # 清理表头，去除空格、换行符
+                cleaned_headers = [str(h).strip().replace('\n', '').replace('\r', '') if h is not None else '' for h in headers]
 
-                    for h_row in header_rows:
-                        if h_row > sheet.max_row:
-                            continue
+                # 查找相关列的索引
+                try:
+                    insured_person_col_idx = cleaned_headers.index("被保险人") + 1 # +1 是因为 openpyxl 是从 1 开始计数
+                    insurance_area_col_idx = cleaned_headers.index("投保面积") + 1
+                except ValueError as e:
+                    print(f"错误: 文件 '{filename}' 中缺少必要的列 '被保险人' 或 '投保面积'。{e}")
+                    continue
 
-                        for col_idx in range(1, max_col_on_sheet + 1):
-                            # 获取单元格原始值，并进行清理
-                            raw_header_value = get_merged_cell_value(sheet, h_row, col_idx)
-                            cleaned_header_value = clean_header_string(raw_header_value)
+                # 新增“赔款金额”列
+                new_col_name = "赔款金额"
+                if new_col_name not in cleaned_headers:
+                    # 在第六行添加新列的名称
+                    ws.cell(row=header_row_index + 1, column=len(headers) + 1, value=new_col_name)
+                    headers.append(new_col_name) # 更新 headers 列表，以便后续查找索引
+                    cleaned_headers.append(new_col_name)
+                
+                payment_amount_col_idx = cleaned_headers.index(new_col_name) + 1
 
-                            # 查找“投保面积”列
-                            if cleaned_header_value == clean_insurance_area_header and insurance_area_col_idx == -1:
-                                insurance_area_col_idx = col_idx
-                                actual_header_row_for_data_start = h_row
 
-                            # 查找“赔偿金额”输出列
-                            if cleaned_header_value == clean_output_column_header and output_col_idx == -1:
-                                output_col_idx = col_idx
-                                if actual_header_row_for_data_start == -1:
-                                    actual_header_row_for_data_start = h_row
+                # 查找或新增“损失程度”列
+                loss_degree_col_name = "损失程度"
+                if loss_degree_col_name not in cleaned_headers:
+                    # 在第六行添加新列的名称
+                    ws.cell(row=header_row_index + 1, column=len(headers) + 1, value=loss_degree_col_name)
+                    headers.append(loss_degree_col_name)
+                    cleaned_headers.append(loss_degree_col_name)
 
-                        if insurance_area_col_idx != -1 and output_col_idx != -1:
-                            break
-                        if insurance_area_col_idx != -1 and output_col_idx == -1: # If only insurance area is found, but compensation amount is not, it may also be necessary to exit the current header_row loop.
-                            break
+                loss_degree_col_idx = cleaned_headers.index(loss_degree_col_name) + 1
+                
+                # 定义浅黄色填充
+                light_yellow_fill = PatternFill(start_color="FFFFCC", end_color="FFFFCC", fill_type="solid")
 
-                    if insurance_area_col_idx == -1:
-                        print(f"警告: 文件 {filename} 工作表 {sheet_name} 在指定表头行 {header_rows} 未找到 '{insurance_area_header}' 列（考虑合并单元格和字符清理），跳过此工作表。")
+                # 遍历数据行（从第六行开始）
+                for r_idx in range(header_row_index + 1, ws.max_row + 1):
+                    # 检查是否是空行
+                    if all(cell.value is None for cell in ws[r_idx]):
                         continue
 
-                    if actual_header_row_for_data_start == -1:
-                        actual_header_row_for_data_start = max(header_rows)
+                    # 获取当前行的“被保险人”和“投保面积”
+                    insured_person = ws.cell(row=r_idx, column=insured_person_col_idx).value
+                    insurance_area = ws.cell(row=r_idx, column=insurance_area_col_idx).value
 
-                    if output_col_idx == -1:
-                        output_col_idx = max_col_on_sheet + 1
-                        sheet.insert_cols(output_col_idx)
-                        sheet.cell(row=actual_header_row_for_data_start, column=output_col_idx, value=output_column_header)
-                        print(f"文件 {filename} 工作表 {sheet_name} 已创建新列 '{output_column_header}' 在 {get_column_letter(output_col_idx)} 列。")
+                    # 处理“被保险人”字段的潜在类型问题
+                    if insured_person is not None:
+                        insured_person = str(insured_person).strip()
+
+                    # 填充“赔款金额”
+                    if isinstance(insurance_area, (int, float)):
+                        ws.cell(row=r_idx, column=payment_amount_col_idx, value=insurance_area * INSURANCE_AMOUNT_FACTOR)
                     else:
-                        print(f"文件 {filename} 工作表 {sheet_name} 中 '{output_column_header}' 列已存在于 {get_column_letter(output_col_idx)} 列，将覆盖原有数据。")
+                        ws.cell(row=r_idx, column=payment_amount_col_idx, value="") # 如果投保面积无效，则留空
 
-                    data_start_row = actual_header_row_for_data_start + 1
-                    max_row = sheet.max_row
-                    if max_row < data_start_row:
-                        print(f"警告: 文件 {filename} 工作表 {sheet_name} 在 '{data_start_row}' 行之后没有找到数据，跳过计算。")
-                        continue
+                    # 填充“损失程度”
+                    loss_percentage_value = ""
+                    found_match = False
+                    for data_item in mongo_data:
+                        # 处理MongoDB中可能存在的类型问题
+                        farmer_name_from_db = str(data_item.get("farmer_name", "")).strip()
+                        if insured_person == farmer_name_from_db:
+                            loss_percentage = data_item.get("loss_percentage")
+                            if isinstance(loss_percentage, (int, float)):
+                                # 四舍五入到小数点后一位，然后乘以100格式化为百分比
+                                loss_percentage_value = f"{round(loss_percentage * 100, 1):.1f}%"
+                            else:
+                                loss_percentage_value = ""
+                            ws.cell(row=r_idx, column=loss_degree_col_idx, value=loss_percentage_value)
+                            # 设置背景色为浅黄色
+                            for cell in ws[r_idx]:
+                                cell.fill = light_yellow_fill
+                            found_match = True
+                            break
 
-                    for row_idx in range(data_start_row, max_row + 1):
-                        insurance_area_value = sheet.cell(row=row_idx, column=insurance_area_col_idx).value
-
-                        if isinstance(insurance_area_value, (int, float)):
-                            compensation_amount = insurance_area_value * compensation_factor
-                            sheet.cell(row=row_idx, column=output_col_idx, value=round(compensation_amount, 2))
+                    if not found_match and mongo_data:
+                        # 如果没有匹配，填写任意一个 avg_loss_same_level
+                        avg_loss_same_level = mongo_data[0].get("avg_loss_same_level")
+                        if isinstance(avg_loss_same_level, (int, float)):
+                            # 四舍五入到小数点后一位，然后乘以100格式化为百分比
+                            loss_percentage_value = f"{round(avg_loss_same_level * 100, 1):.1f}%"
                         else:
-                            sheet.cell(row=row_idx, column=output_col_idx, value="数据错误")
+                            loss_percentage_value = ""
+                        ws.cell(row=r_idx, column=loss_degree_col_idx, value=loss_percentage_value)
+                    elif not found_match and not mongo_data:
+                        ws.cell(row=r_idx, column=loss_degree_col_idx, value="") # 如果MongoDB数据为空，则留空
+                # 应用样式
+                apply_styles(ws)
 
-                    # Apply styles after data processing
-                    print(f"    正在为工作表 {sheet_name} 应用样式...")
-                    apply_excel_styles(sheet, header_rows, output_col_idx) # Call the new styling function
-
-
-                wb.save(filepath)
-                processed_files += 1
-                print(f"处理成功: {filename}")
+                # 保存处理后的文件
+                output_file_path = os.path.join(output_path, filename)
+                wb.save(output_file_path)
+                print(f"文件 '{filename}' 处理完成，已保存到: {output_file_path}")
 
             except Exception as e:
-                print(f"处理文件 {filename} 失败: {e}")
+                print(f"处理文件 '{filename}' 时发生错误: {e}")
 
-    print(f"\n处理完成！共处理 {processed_files} 个文件")
+    client.close()
+    print("所有文件处理完毕。")
+
+if __name__ == "__main__":
+    main()

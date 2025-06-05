@@ -13,12 +13,14 @@ python = ">=3.9,<3.11"
 openpyxl = "^3.1.5"
 xlrd = "^2.0.1"
 pandas = "^2.2.3"
-
+pymongo = "^4.13.0"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
-my-cli = "excel.main:main"  # 指向 main.py 的 main() 函数
+process = "excel.file_processor:main"  # 指向 main.py 的 main() 函数
 convert = "excel.convert_xls_to_xlsx:main"  
+insert_mongodb = "excel.agricultural_loss_records:main"  
+format = "excel.merged_cell_range:main"  # 格式化合并单元格问题

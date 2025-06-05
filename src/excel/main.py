@@ -10,7 +10,8 @@ def main():
             insurance_area_header=config["insurance_area_header"],
             compensation_factor=config["compensation_factor"],
             output_column_header=config["output_column_header"],
-            header_rows=config["header_rows"]
+            header_rows=config["header_rows"],
+            output_path=config["output_path"]
         )
     input("\n按回车键退出...")
     sys.exit() # Ensure the script exits after user presses Enter
