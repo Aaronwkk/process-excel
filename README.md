@@ -28,9 +28,31 @@
 ## 使用方法
 
 1. 运行程序：
+
+   第一步 转化业务文件，将xls格式转化为xlsx文件
+
    ```bash
-   poetry run convert /Users/a1/理赔文件
-   poetry run my-cli
+   poetry run convert
+   ```
+
+   第二步 处理模版文件，解决文件模版单元格问题
+
+   ```bash
+   poetry run format
+   ```
+
+   第三步 将处理之后的模版文件导入到 数据库，这时需要设置表名称  
+   .env文件
+   COLLECTION_NAME="yuanlao"
+
+   ```bash
+   poetry run insert_mongodb
+   ```
+
+   第四步 处理主文件
+
+   ```bash
+   poetry run process
    ```
 
 2. 按照提示输入：
@@ -97,7 +119,7 @@ output_path = "/Users/a1/理赔文件/_deal_data/"
 
 按照新的提示词，继续修改代码，用汉语
 
-修改代码，加入样式设定，样式修改单独抽离出一个函数处理
+修改代码，加入样式设定，样式修改单独抽离出一个函数处理，用汉语写注释
 
 前三行合并单元格，字体大小为24，加粗，宽度以内容多少做适配
 第四行合并单元格

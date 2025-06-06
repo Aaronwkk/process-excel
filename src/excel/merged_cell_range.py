@@ -1,33 +1,34 @@
 import openpyxl
 import re
+import os
 from openpyxl.utils import get_column_letter, column_index_from_string
+from dotenv import load_dotenv # 导入 load_dotenv
 
 def unmerge_and_fill_with_original_format(input_filepath: str, output_filepath: str):
     """
-    Unmerges cells in an Excel file, fills down the values,
-    and attempts to preserve the original cell's number format,
-    especially for percentage columns.
+    取消合并 Excel 文件中的单元格，并向下填充值，
+    同时尝试保留原始单元格的数字格式，特别是百分比列。
 
     Args:
-        input_filepath (str): The path to the input .xlsx file with merged cells.
-        output_filepath (str): The path to save the processed .xlsx file.
+        input_filepath (str): 包含合并单元格的输入 .xlsx 文件路径。
+        output_filepath (str): 保存处理后的 .xlsx 文件的路径。
     """
     try:
-        # Load the workbook
+        # 加载工作簿
         workbook = openpyxl.load_workbook(input_filepath)
         sheet = workbook.active
 
-        # Get a list of merged cell ranges as strings
+        # 获取合并单元格范围的字符串列表
         merged_ranges_str = [str(mr) for mr in sheet.merged_cells]
 
-        # Iterate through each merged range string
+        # 遍历每个合并单元格范围字符串
         for merged_range_str in merged_ranges_str:
-            # Parse the cell range string to get min_col, min_row, max_col, max_row
+            # 解析单元格范围字符串以获取 min_col, min_row, max_col, max_row
             try:
                 from openpyxl.utils.cell import range_boundaries
                 min_col, min_row, max_col, max_row = range_boundaries(merged_range_str)
             except ImportError:
-                # Fallback for older openpyxl versions
+                # 兼容旧版 openpyxl 的备用方案
                 col_start, row_start, col_end, row_end = re.match(r"([A-Z]+)(\d+):([A-Z]+)(\d+)", merged_range_str).groups()
 
                 min_col = column_index_from_string(col_start)
@@ -35,40 +36,56 @@ def unmerge_and_fill_with_original_format(input_filepath: str, output_filepath: 
                 max_col = column_index_from_string(col_end)
                 max_row = int(row_end)
 
-            # Get the top-left cell of the merged range
+            # 获取合并区域的左上角单元格
             top_left_cell = sheet.cell(row=min_row, column=min_col)
             top_left_cell_value = top_left_cell.value
-            top_left_cell_format = top_left_cell.number_format # 获取源单元格的格式
+            top_left_cell_format = top_left_cell.number_format # 获取源单元格的数字格式
 
-            # Unmerge the cells
+            # 取消合并单元格
             sheet.unmerge_cells(merged_range_str)
 
-            # Fill down the value and copy the number format to all previously merged cells
+            # 将值向下填充，并将数字格式复制到所有先前合并的单元格
             for row_idx in range(min_row, max_row + 1):
                 for col_idx in range(min_col, max_col + 1):
                     cell = sheet.cell(row=row_idx, column=col_idx)
                     cell.value = top_left_cell_value
                     cell.number_format = top_left_cell_format # 将源单元格的格式复制过来
 
-        # Save the modified workbook
+        # 保存修改后的工作簿
         workbook.save(output_filepath)
-        print(f"Successfully processed and saved to: {output_filepath}")
+        print(f"成功处理并保存到: {output_filepath}")
 
     except FileNotFoundError:
-        print(f"Error: Input file not found at {input_filepath}")
+        print(f"错误: 未找到输入文件 {input_filepath}")
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"处理文件 {input_filepath} 时发生错误: {e}")
 
 def main():
     """
-    Main function to run the unmerge and fill script.
+    主函数，用于对指定目录中所有 .xlsx 文件执行取消合并和填充脚本。
     """
-    input_file = "/Users/a1/理赔文件/temp/大武乡散户损失程度情况表_副本.xlsx"  # 请替换为您的输入文件名
-    output_file = "/Users/a1/理赔文件/temp/_大武乡散户损失程度情况表_副本.xlsx" # 请替换为您的输出文件名
+    # 加载 .env 文件中的环境变量
+    load_dotenv() 
 
-    unmerge_and_fill_with_original_format(input_file, output_file)
+    # 从环境变量获取输入和输出目录
+    # 如果环境变量未设置，可以使用 .get() 方法提供默认值
+    input_directory = os.getenv("INPUT_DIRECTORY") 
+    output_directory = os.getenv("OUTPUT_DIRECTORY")
+
+    print(input_directory, output_directory)
+
+    # 如果输出目录不存在则创建它
+    os.makedirs(output_directory, exist_ok=True)
+
+    # 遍历输入目录中的所有文件
+    for filename in os.listdir(input_directory):
+        # 检查文件是否是 .xlsx 文件
+        if filename.endswith(".xlsx"):
+            input_file_path = os.path.join(input_directory, filename)
+            output_file_path = os.path.join(output_directory, filename)
+            
+            print(f"正在处理文件: {filename}")
+            unmerge_and_fill_with_original_format(input_file_path, output_file_path)
 
 if __name__ == "__main__":
-    # 确保您安装了 openpyxl: pip install openpyxl
-    # 如果您使用的是 poetry，请确保 poetry install 已经运行
     main()

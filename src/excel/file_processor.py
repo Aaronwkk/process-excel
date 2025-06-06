@@ -7,6 +7,10 @@ from openpyxl.styles import PatternFill, Font, Alignment
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.merge import MergeCells
 from openpyxl.utils import range_boundaries
+from dotenv import load_dotenv
+import os
+
+load_dotenv() # 这会加载 .env 文件中的所有变量到 os.environ
 
 def apply_styles(ws):
     """
@@ -34,25 +38,53 @@ def apply_styles(ws):
     for col_idx in range(1, max_column + 1):
         col_letter = get_column_letter(col_idx)
         # 检查是否已经存在合并单元格，避免重复合并
-        if f'{col_letter}5:{col_letter}6' not in [str(m) for m in ws.merged_cells.ranges]:
-            ws.merge_cells(f'{col_letter}5:{col_letter}6')
+        # 这里需要更精细地检查，避免影响到A1:MaxCol3 和 A4:MaxCol4 的合并
+        # 我们可以检查当前单元格是否属于这些大合并单元格的一部分
+        is_part_of_large_merge = False
+        for merged_range in ws.merged_cells.ranges:
+            min_col, min_row, max_col_m, max_row_m = range_boundaries(str(merged_range))
+            if min_row <= 5 <= max_row_m and min_col <= col_idx <= max_col_m:
+                is_part_of_large_merge = True
+                break
         
-        # 设置表头字体和居中
-        header_cell = ws.cell(row=5, column=col_idx)
-        header_cell.font = Font(size=12, bold=True)
-        header_cell.alignment = Alignment(horizontal='center', vertical='center')
-        
-        # 确保第六行的对应单元格也居中，因为它们被合并了
-        ws.cell(row=6, column=col_idx).alignment = Alignment(horizontal='center', vertical='center')
+        if not is_part_of_large_merge: # 只有当不属于大合并单元格时才进行纵向合并
+            if f'{col_letter}5:{col_letter}6' not in [str(m) for m in ws.merged_cells.ranges]:
+                ws.merge_cells(f'{col_letter}5:{col_letter}6')
+            
+            # 设置表头字体和居中
+            header_cell = ws.cell(row=5, column=col_idx)
+            header_cell.font = Font(size=12, bold=True)
+            header_cell.alignment = Alignment(horizontal='center', vertical='center')
+            
+            # 确保第六行的对应单元格也居中，因为它们被合并了
+            ws.cell(row=6, column=col_idx).alignment = Alignment(horizontal='center', vertical='center')
+        else:
+            # 如果是大的合并单元格的一部分，仍然确保内容居中（尽管通常已经设置过了）
+            cell_5 = ws.cell(row=5, column=col_idx)
+            cell_5.alignment = Alignment(horizontal='center', vertical='center')
+            cell_6 = ws.cell(row=6, column=col_idx)
+            cell_6.alignment = Alignment(horizontal='center', vertical='center')
 
 
     # --- 设置所有单元格文字居中 ---
-    for row in ws.iter_rows():
-        for cell in row:
-            cell.alignment = Alignment(horizontal='center', vertical='center')
+    # 遍历所有行和列，但要避免修改已经合并的标题单元格的对齐方式，
+    # 因为它们的对齐方式已经在上面显式设置过了。
+    # 我们可以从第 5 行开始遍历数据行，确保数据行的对齐方式
+    for r_idx in range(5, ws.max_row + 1):
+        for col_idx in range(1, ws.max_column + 1):
+            cell = ws.cell(row=r_idx, column=col_idx)
+            # 避免覆盖顶部大标题的对齐方式，只设置未合并单元格或数据单元格
+            is_merged_cell_part = False
+            for merged_range in ws.merged_cells.ranges:
+                min_col, min_row, max_col_m, max_row_m = range_boundaries(str(merged_range))
+                if min_row <= r_idx <= max_row_m and min_col <= col_idx <= max_col_m and (min_row < 5 or max_row_m < 6): # 排除第五行和第六行表头合并
+                    is_merged_cell_part = True
+                    break
+            if not is_merged_cell_part:
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+
 
     # --- 列宽设定 ---
-    # 宽度以内容多少做适配 (针对前三行标题) - 这个通常是自动的，但这里可以设置一个基础值
     # 对于所有列，设置默认宽度为12
     for col_idx in range(1, max_column + 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = 12
@@ -60,13 +92,14 @@ def apply_styles(ws):
     # “身份证号码”列宽为 20
     # 需要找到“身份证号码”列的索引
     header_row_index = 5
-    headers = [cell.value for cell in ws[header_row_index]]
+    # 重新从工作表中获取表头，因为可能新增了列
+    headers_in_excel = [cell.value for cell in ws[header_row_index]]
     
     # 清理表头，去除空格、换行符，以便查找
-    cleaned_headers = [str(h).strip().replace('\n', '').replace('\r', '') if h is not None else '' for h in headers]
+    cleaned_headers_in_excel = [str(h).strip().replace('\n', '').replace('\r', '') if h is not None else '' for h in headers_in_excel]
 
     try:
-        id_card_col_idx = cleaned_headers.index("身份证号码") + 1
+        id_card_col_idx = cleaned_headers_in_excel.index("身份证号码") + 1
         ws.column_dimensions[get_column_letter(id_card_col_idx)].width = 20
     except ValueError:
         print("警告: 未找到 '身份证号码' 列，无法单独设置其宽度。")
@@ -74,15 +107,14 @@ def apply_styles(ws):
 
 def main():
     # --- 配置参数 ---
-    mongodb_uri = "mongodb://localhost:27017/"
-    db_name = "agricultural_insurance"
-    collection_name = "loss_records"
     
-    # 需要处理的文件路径
-    path = "/Users/a1/理赔文件/_data/"  # 包含 Excel 文件的目录
-    output_path = "/Users/a1/理赔文件/_deal_data/"  # 处理后文件的输出目录
-    
-    INSURANCE_AMOUNT_FACTOR = 17 # 固定值，用于计算赔款金额
+    mongodb_uri = os.getenv("MONGODB_URI")
+    db_name = os.getenv("DB_NAME")
+    collection_name = os.getenv("COLLECTION_NAME")
+
+    path = os.getenv("DATA_DIRECTORY") # 存放Excel文件的目录
+    output_path = os.getenv("_DATA_DIRECTORY") # 存放Excel文件的目录
+    INSURANCE_AMOUNT_FACTOR = os.getenv("INSURANCE_AMOUNT_FACTOR") # 存放Excel文件的目录
 
     # 确保输出目录存在
     os.makedirs(output_path, exist_ok=True)
@@ -118,44 +150,65 @@ def main():
 
                 # 找到表头行（第五行）
                 header_row_index = 5
-                headers = [cell.value for cell in ws[header_row_index]]
+                # 获取原始的表头，用于确定现有列的数量
+                original_headers = [cell.value for cell in ws[header_row_index]]
                 
-                # 清理表头，去除空格、换行符
-                cleaned_headers = [str(h).strip().replace('\n', '').replace('\r', '') if h is not None else '' for h in headers]
+                # 清理原始表头，去除空格、换行符
+                cleaned_original_headers = [str(h).strip().replace('\n', '').replace('\r', '') if h is not None else '' for h in original_headers]
+
+                # --- 新增“赔款金额”列 ---
+                new_col_name_payment = "赔款金额"
+                payment_amount_col_idx = -1 # 初始化，表示未找到
+                
+                # 检查“赔款金额”是否已存在
+                if new_col_name_payment not in cleaned_original_headers:
+                    # 如果不存在，则在现有列的末尾添加新列
+                    payment_amount_col_idx = len(original_headers) + 1
+                    ws.cell(row=header_row_index, column=payment_amount_col_idx, value=new_col_name_payment)
+                    # 同时更新第六行，因为第五行和第六行会合并
+                    ws.cell(row=header_row_index + 1, column=payment_amount_col_idx, value=new_col_name_payment)
+                else:
+                    # 如果已存在，找到其索引
+                    payment_amount_col_idx = cleaned_original_headers.index(new_col_name_payment) + 1
+
+                # --- 查找或新增“损失程度”列 ---
+                loss_degree_col_name = "损失程度"
+                loss_degree_col_idx = -1 # 初始化
+                
+                # 重新获取当前最新的表头（可能已经添加了“赔款金额”）
+                current_headers_for_loss_degree_check = [cell.value for cell in ws[header_row_index]]
+                cleaned_current_headers_for_loss_degree_check = [str(h).strip().replace('\n', '').replace('\r', '') if h is not None else '' for h in current_headers_for_loss_degree_check]
+
+                if loss_degree_col_name not in cleaned_current_headers_for_loss_degree_check:
+                    # 如果不存在，则在当前列的末尾添加新列
+                    loss_degree_col_idx = len(current_headers_for_loss_degree_check) + 1
+                    ws.cell(row=header_row_index, column=loss_degree_col_idx, value=loss_degree_col_name)
+                    # 同时更新第六行
+                    ws.cell(row=header_row_index + 1, column=loss_degree_col_idx, value=loss_degree_col_name)
+                else:
+                    # 如果已存在，找到其索引
+                    loss_degree_col_idx = cleaned_current_headers_for_loss_degree_check.index(loss_degree_col_name) + 1
+
+
+                # 现在，重新获取完整的、最新的表头，用于查找“被保险人”和“投保面积”的索引
+                # 确保在所有新列添加完毕后再获取一次，这样索引才是正确的
+                final_headers = [cell.value for cell in ws[header_row_index]]
+                cleaned_final_headers = [str(h).strip().replace('\n', '').replace('\r', '') if h is not None else '' for h in final_headers]
+
 
                 # 查找相关列的索引
                 try:
-                    insured_person_col_idx = cleaned_headers.index("被保险人") + 1 # +1 是因为 openpyxl 是从 1 开始计数
-                    insurance_area_col_idx = cleaned_headers.index("投保面积") + 1
+                    insured_person_col_idx = cleaned_final_headers.index("被保险人") + 1 # +1 是因为 openpyxl 是从 1 开始计数
+                    insurance_area_col_idx = cleaned_final_headers.index("投保面积") + 1
                 except ValueError as e:
                     print(f"错误: 文件 '{filename}' 中缺少必要的列 '被保险人' 或 '投保面积'。{e}")
                     continue
-
-                # 新增“赔款金额”列
-                new_col_name = "赔款金额"
-                if new_col_name not in cleaned_headers:
-                    # 在第六行添加新列的名称
-                    ws.cell(row=header_row_index + 1, column=len(headers) + 1, value=new_col_name)
-                    headers.append(new_col_name) # 更新 headers 列表，以便后续查找索引
-                    cleaned_headers.append(new_col_name)
-                
-                payment_amount_col_idx = cleaned_headers.index(new_col_name) + 1
-
-
-                # 查找或新增“损失程度”列
-                loss_degree_col_name = "损失程度"
-                if loss_degree_col_name not in cleaned_headers:
-                    # 在第六行添加新列的名称
-                    ws.cell(row=header_row_index + 1, column=len(headers) + 1, value=loss_degree_col_name)
-                    headers.append(loss_degree_col_name)
-                    cleaned_headers.append(loss_degree_col_name)
-
-                loss_degree_col_idx = cleaned_headers.index(loss_degree_col_name) + 1
                 
                 # 定义浅黄色填充
                 light_yellow_fill = PatternFill(start_color="FFFFCC", end_color="FFFFCC", fill_type="solid")
 
                 # 遍历数据行（从第六行开始）
+                # 注意：数据从 header_row_index + 1 开始，即第 6 行
                 for r_idx in range(header_row_index + 1, ws.max_row + 1):
                     # 检查是否是空行
                     if all(cell.value is None for cell in ws[r_idx]):
@@ -170,6 +223,7 @@ def main():
                         insured_person = str(insured_person).strip()
 
                     # 填充“赔款金额”
+                    # 确保只填充到“赔款金额”列
                     if isinstance(insurance_area, (int, float)):
                         ws.cell(row=r_idx, column=payment_amount_col_idx, value=insurance_area * INSURANCE_AMOUNT_FACTOR)
                     else:
@@ -206,6 +260,7 @@ def main():
                         ws.cell(row=r_idx, column=loss_degree_col_idx, value=loss_percentage_value)
                     elif not found_match and not mongo_data:
                         ws.cell(row=r_idx, column=loss_degree_col_idx, value="") # 如果MongoDB数据为空，则留空
+
                 # 应用样式
                 apply_styles(ws)
 

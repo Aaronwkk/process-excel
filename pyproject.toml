@@ -14,13 +14,14 @@ openpyxl = "^3.1.5"
 xlrd = "^2.0.1"
 pandas = "^2.2.3"
 pymongo = "^4.13.0"
+python-dotenv = "^1.1.0"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
-process = "excel.file_processor:main"  # 指向 main.py 的 main() 函数
-convert = "excel.convert_xls_to_xlsx:main"  
-insert_mongodb = "excel.agricultural_loss_records:main"  
-format = "excel.merged_cell_range:main"  # 格式化合并单元格问题
+process = "excel.file_processor:main"  # 处理文件主流程
+convert = "excel.convert_xls_to_xlsx:main"  # 将文件转化为xlsx 解决兼容性问题
+insert_mongodb = "excel.insert_mongodb:main"  # 将模版文件导入到数据库中
+format = "excel.merged_cell_range:main"  # 格式化模版中单元格问题

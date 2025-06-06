@@ -1,6 +1,9 @@
 import os
 import pandas as pd
 import sys # 确保导入 sys 模块
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def convert_xls_to_xlsx_mac(folder_path, output_folder):
     """
@@ -86,8 +89,11 @@ def main():
     # 您可以在这里修改这两个路径以适应您的需求
     # target_folder 是您要扫描的包含 .xls 文件的原始文件夹
     # output_folder 是您希望保存转换后的 .xlsx 文件的目标文件夹
-    target_folder = "/Users/a1/理赔文件/data"
-    output_folder = "/Users/a1/理赔文件/_data" # 新增：指定导出文件地址
+
+    target_folder = os.getenv("CONVERT_FILE")
+    output_folder = os.getenv("OUTPUT_FILE") # 存放Excel文件的目录
+
+    print(target_folder, output_folder)
 
     print("\n--- 开始 .xls 到 .xlsx 转换 ---")
     success = convert_xls_to_xlsx_mac(target_folder, output_folder)
