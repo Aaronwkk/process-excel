@@ -114,7 +114,7 @@ def main():
 
     path = os.getenv("DATA_DIRECTORY") # 存放Excel文件的目录
     output_path = os.getenv("_DATA_DIRECTORY") # 存放Excel文件的目录
-    INSURANCE_AMOUNT_FACTOR = os.getenv("INSURANCE_AMOUNT_FACTOR") # 存放Excel文件的目录
+    INSURANCE_AMOUNT_FACTOR = int(os.environ.get("INSURANCE_AMOUNT_FACTOR", "17"))
 
     # 确保输出目录存在
     os.makedirs(output_path, exist_ok=True)
@@ -132,7 +132,7 @@ def main():
 
             try:
                 # 提取行政村关键字
-                match = re.match(r"^(.*?村委会)", filename)
+                match = re.match(r"^(.*?村)", filename)
                 if not match:
                     print(f"警告: 文件名 '{filename}' 未能提取到行政村信息，跳过。")
                     continue
